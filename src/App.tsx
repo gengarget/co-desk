@@ -313,10 +313,70 @@ export default function App() {
     return source;
   }
 
+  function createSoftRainSource(ctx: AudioContext) {
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let smooth = 0;
+    for (let index = 0; index < data.length; index += 1) {
+      smooth = smooth * 0.965 + (Math.random() * 2 - 1) * 0.035;
+      data[index] = smooth * 1.8;
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    return source;
+  }
+
+  function startRainNightAudio(ctx: AudioContext) {
+    const rainGain = ctx.createGain();
+    rainGain.gain.value = 0.13;
+    rainGain.connect(ctx.destination);
+    stopAudioRef.current.push(() => rainGain.disconnect());
+
+    const rain = createSoftRainSource(ctx);
+    const rainLowpass = ctx.createBiquadFilter();
+    rainLowpass.type = "lowpass";
+    rainLowpass.frequency.value = 1150;
+    rainLowpass.Q.value = 0.35;
+    rain.connect(rainLowpass);
+    rainLowpass.connect(rainGain);
+    rain.start();
+    stopAudioRef.current.push(() => {
+      rain.stop();
+      rain.disconnect();
+      rainLowpass.disconnect();
+    });
+
+    const createDrop = () => {
+      const drop = createNoiseSource(ctx);
+      const dropFilter = ctx.createBiquadFilter();
+      const dropGain = ctx.createGain();
+      dropFilter.type = "bandpass";
+      dropFilter.frequency.value = 1700 + Math.random() * 1300;
+      dropFilter.Q.value = 5 + Math.random() * 5;
+      dropGain.gain.setValueAtTime(0.001, ctx.currentTime);
+      dropGain.gain.exponentialRampToValueAtTime(0.012 + Math.random() * 0.012, ctx.currentTime + 0.018);
+      dropGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16 + Math.random() * 0.12);
+      drop.connect(dropFilter);
+      dropFilter.connect(dropGain);
+      dropGain.connect(rainGain);
+      drop.start();
+      drop.stop(ctx.currentTime + 0.35);
+    };
+
+    const intervalId = window.setInterval(createDrop, 420 + Math.random() * 360);
+    stopAudioRef.current.push(() => window.clearInterval(intervalId));
+  }
+
   async function startAmbientAudio(mode: string) {
     const ctx = getAudioContext();
     await ctx.resume();
     clearAmbientAudio();
+
+    if (mode === "rain") {
+      startRainNightAudio(ctx);
+      return;
+    }
 
     const gain = ctx.createGain();
     gain.gain.value = mode === "cafe" ? 0.16 : 0.22;
