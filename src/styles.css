@@ -578,6 +578,7 @@ button:disabled {
   border-radius: 8px;
   background: #f8fafc;
   color: #758196;
+  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .seat.occupied {

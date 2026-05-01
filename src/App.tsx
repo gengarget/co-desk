@@ -251,15 +251,14 @@ export default function App() {
         status: running ? "专注中" : "准备中",
         current_task: currentTaskTitle,
         timer_label: formatTime(remaining),
-        ambient: ambientLabel,
-        seat: preferredSeat ?? undefined
+        ambient: ambientLabel
       })
     );
-  }, [ambientLabel, currentTaskTitle, preferredSeat, remaining, running]);
+  }, [ambientLabel, currentTaskTitle, remaining, running]);
 
   useEffect(() => {
     broadcastState();
-  }, [broadcastState]);
+  }, [ambientLabel, currentTaskTitle, running]);
 
   const finishFocus = useCallback(
     async (save: boolean) => {
@@ -471,8 +470,18 @@ export default function App() {
       void playSeatCue(seat);
       return;
     }
+    const socket = wsRef.current;
     setPreferredSeat(seat);
-    window.setTimeout(broadcastState, 0);
+    if (user) {
+      setPeers((previous) =>
+        previous.map((item) =>
+          item.user_id === user.id ? { ...item, seat } : item
+        )
+      );
+    }
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "move_seat", seat }));
+    }
     void playSeatCue(seat);
   }
 

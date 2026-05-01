@@ -270,14 +270,19 @@ class RoomHub:
       peer.current_task = str(payload.get("current_task", peer.current_task))[:80]
       peer.timer_label = str(payload.get("timer_label", peer.timer_label))[:12]
       peer.ambient = str(payload.get("ambient", peer.ambient))[:24]
-      requested_seat = payload.get("seat")
-      if isinstance(requested_seat, int) and 1 <= requested_seat <= 10:
-        occupied_by_other = any(
-          other.user_id != user_id and other.seat == requested_seat
-          for other in self.rooms.get(room_id, {}).values()
-        )
-        if not occupied_by_other:
-          peer.seat = requested_seat
+    await self.broadcast_state(room_id)
+
+  async def move_seat(self, room_id: str, user_id: str, requested_seat: int) -> None:
+    async with self.lock:
+      peer = self.rooms.get(room_id, {}).get(user_id)
+      if not peer or not isinstance(requested_seat, int) or not 1 <= requested_seat <= 10:
+        return
+      occupied_by_other = any(
+        other.user_id != user_id and other.seat == requested_seat
+        for other in self.rooms.get(room_id, {}).values()
+      )
+      if not occupied_by_other:
+        peer.seat = requested_seat
     await self.broadcast_state(room_id)
 
   async def count(self, room_id: str) -> int:
@@ -668,6 +673,8 @@ async def room_socket(websocket: WebSocket, room_id: str, user_id: str, display_
         continue
       if message.get("type") == "state":
         await hub.update_peer(room_id, user_id, message)
+      elif message.get("type") == "move_seat":
+        await hub.move_seat(room_id, user_id, message.get("seat"))
       elif message.get("type") == "ping":
         await websocket.send_json({"type": "pong", "at": now_iso()})
   except WebSocketDisconnect:
