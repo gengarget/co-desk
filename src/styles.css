@@ -116,6 +116,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 22px;
+  overflow: hidden;
 }
 
 .right-rail {
@@ -202,7 +203,10 @@ button:disabled {
 }
 
 .room-list {
+  flex: 1;
   min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .room-row {
@@ -223,13 +227,13 @@ button:disabled {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 3px;
   width: 100%;
-  min-height: 66px;
+  min-height: 52px;
   border: 0;
   background: transparent;
   color: #182132;
-  padding: 12px;
+  padding: 9px 10px 7px;
   text-align: left;
   transition: transform 0.18s ease;
 }
@@ -239,21 +243,21 @@ button:disabled {
 }
 
 .room-button span {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
 }
 
 .room-button small {
   color: #69778a;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .room-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 4px;
   border-top: 1px solid #edf0f4;
-  padding: 0 10px 10px;
+  padding: 0 8px 7px;
 }
 
 .room-edit-form {
@@ -264,13 +268,13 @@ button:disabled {
 }
 
 .mini-button {
-  min-height: 30px;
+  min-height: 24px;
   border: 1px solid #d8dee8;
   border-radius: 8px;
   background: #ffffff;
   color: #566276;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 6px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -581,6 +585,16 @@ button:disabled {
   border-color: #83c9bb;
   background: #effaf6;
   color: #206b5c;
+}
+
+.seat.mine {
+  border-color: #0f8f7f;
+  background: #e5f7f1;
+  box-shadow: inset 0 0 0 1px rgba(15, 143, 127, 0.2);
+}
+
+.seat.occupied:not(.mine) {
+  cursor: not-allowed;
 }
 
 .seat strong {

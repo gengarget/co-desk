@@ -101,6 +101,7 @@ export default function App() {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [cards, setCards] = useState<Encouragement[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [preferredSeat, setPreferredSeat] = useState<number | null>(null);
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("offline");
   const [remaining, setRemaining] = useState(FOCUS_SECONDS);
   const [running, setRunning] = useState(false);
@@ -207,6 +208,8 @@ export default function App() {
       const message = JSON.parse(event.data) as RoomSocketMessage;
       if (message.type === "room_state") {
         setPeers(message.peers);
+        const me = message.peers.find((peer) => peer.user_id === user?.id);
+        if (me) setPreferredSeat(me.seat);
         setRooms((previous) =>
           previous.map((room) =>
             room.id === message.room_id ? { ...room, online_count: message.online_count } : room
@@ -248,10 +251,11 @@ export default function App() {
         status: running ? "专注中" : "准备中",
         current_task: currentTaskTitle,
         timer_label: formatTime(remaining),
-        ambient: ambientLabel
+        ambient: ambientLabel,
+        seat: preferredSeat ?? undefined
       })
     );
-  }, [ambientLabel, currentTaskTitle, remaining, running]);
+  }, [ambientLabel, currentTaskTitle, preferredSeat, remaining, running]);
 
   useEffect(() => {
     broadcastState();
@@ -462,6 +466,16 @@ export default function App() {
     source.stop(ctx.currentTime + 0.24);
   }
 
+  function handleSeatClick(seat: number, peer?: Peer) {
+    if (peer && peer.user_id !== user?.id) {
+      void playSeatCue(seat);
+      return;
+    }
+    setPreferredSeat(seat);
+    window.setTimeout(broadcastState, 0);
+    void playSeatCue(seat);
+  }
+
   function startFocus() {
     if (running) return;
     focusStartedAtRef.current = Date.now();
@@ -535,6 +549,7 @@ export default function App() {
       );
     }
     setPeers([]);
+    setPreferredSeat(null);
     setActiveRoom(room);
   }
 
@@ -564,6 +579,7 @@ export default function App() {
       if (activeRoom?.id === room.id) {
         setActiveRoom(nextRooms[0] ?? null);
         setPeers([]);
+        setPreferredSeat(null);
       }
       return nextRooms;
     });
@@ -935,12 +951,19 @@ export default function App() {
           <div className="seat-grid">
             {seatSlots.map((peer, index) => (
               <button
-                className={`seat ${peer ? "occupied" : ""}`}
+                className={`seat ${peer ? "occupied" : ""} ${peer?.user_id === user?.id ? "mine" : ""}`}
                 key={index}
-                onClick={() => void playSeatCue(index + 1)}
+                onClick={() => handleSeatClick(index + 1, peer)}
+                title={peer && peer.user_id !== user?.id ? "这个座位已被占用" : "点击选择这个空位"}
               >
                 <strong>{peer ? (peer.user_id === user?.id ? "我" : peer.display_name.slice(0, 2)) : index + 1}</strong>
-                <span>{peer ? (peer.user_id === user?.id ? `我 · ${peer.status}` : peer.status) : "空位"}</span>
+                <span>
+                  {peer
+                    ? peer.user_id === user?.id
+                      ? `我的座位 · ${peer.status}`
+                      : peer.status
+                    : "点击入座"}
+                </span>
               </button>
             ))}
           </div>

@@ -270,6 +270,14 @@ class RoomHub:
       peer.current_task = str(payload.get("current_task", peer.current_task))[:80]
       peer.timer_label = str(payload.get("timer_label", peer.timer_label))[:12]
       peer.ambient = str(payload.get("ambient", peer.ambient))[:24]
+      requested_seat = payload.get("seat")
+      if isinstance(requested_seat, int) and 1 <= requested_seat <= 10:
+        occupied_by_other = any(
+          other.user_id != user_id and other.seat == requested_seat
+          for other in self.rooms.get(room_id, {}).values()
+        )
+        if not occupied_by_other:
+          peer.seat = requested_seat
     await self.broadcast_state(room_id)
 
   async def count(self, room_id: str) -> int:
