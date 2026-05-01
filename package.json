@@ -1,0 +1,30 @@
+{
+  "name": "co-desk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Co-Desk desktop client with a FastAPI backend for an HCI course project.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n SERVER,VITE,ELECTRON -c green,cyan,magenta \"python server/main.py\" \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:8124 http://127.0.0.1:5173 && electron .\"",
+    "dev:server": "python server/main.py",
+    "dev:client": "vite --host 127.0.0.1",
+    "electron": "wait-on http://127.0.0.1:5173 && electron .",
+    "stop:dev": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-NetTCPConnection -LocalPort 8124,5173 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }\"",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^33.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  }
+}
