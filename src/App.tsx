@@ -112,6 +112,16 @@ export default function App() {
 
   const currentTaskTitle = selectedTask?.title ?? "自由专注";
   const ambientLabel = ambientOptions.find((item) => item.id === ambientId)?.label ?? "图书馆底噪";
+  const activeRoomId = activeRoom?.id;
+
+  const getRoomPeerCount = useCallback(
+    (room: Room) => {
+      const total = room.online_count ?? 0;
+      if (user && room.id === activeRoomId) return Math.max(0, total - 1);
+      return total;
+    },
+    [activeRoomId, user]
+  );
 
   function applyServerBase() {
     setApiBase(serverBase || DEFAULT_API_BASE);
@@ -173,8 +183,6 @@ export default function App() {
     reloadStats(user).catch((caught: Error) => setError(caught.message));
   }, [reloadStats, reloadTasks, user]);
 
-  const activeRoomId = activeRoom?.id;
-
   useEffect(() => {
     if (!user || !activeRoomId) return;
     setConnection("connecting");
@@ -187,6 +195,9 @@ export default function App() {
         setConnection("offline");
         setPeers([]);
       }
+      window.setTimeout(() => {
+        void reloadRooms().catch((caught: Error) => setError(caught.message));
+      }, 350);
     };
     socket.onerror = () => setConnection("offline");
     socket.onmessage = (event) => {
@@ -212,8 +223,11 @@ export default function App() {
     return () => {
       socket.close();
       if (wsRef.current === socket) wsRef.current = null;
+      window.setTimeout(() => {
+        void reloadRooms().catch((caught: Error) => setError(caught.message));
+      }, 350);
     };
-  }, [activeRoomId, user?.display_name, user?.id]);
+  }, [activeRoomId, reloadRooms, user?.display_name, user?.id]);
 
   useEffect(() => {
     runningRef.current = running;
@@ -397,6 +411,20 @@ export default function App() {
     setNewRoomName("");
   }
 
+  function handleSelectRoom(room: Room) {
+    if (activeRoom?.id && activeRoom.id !== room.id && user) {
+      setRooms((previous) =>
+        previous.map((item) =>
+          item.id === activeRoom.id
+            ? { ...item, online_count: Math.max(0, item.online_count - 1) }
+            : item
+        )
+      );
+    }
+    setPeers([]);
+    setActiveRoom(room);
+  }
+
   async function handleAddTask(event: FormEvent) {
     event.preventDefault();
     if (!user) return;
@@ -510,10 +538,14 @@ export default function App() {
             <button
               className={`room-button ${activeRoom?.id === room.id ? "active" : ""}`}
               key={room.id}
-              onClick={() => setActiveRoom(room)}
+              onClick={() => handleSelectRoom(room)}
             >
               <span>{room.name}</span>
-              <small>{room.online_count} 人在线</small>
+              <small>
+                {getRoomPeerCount(room) > 0
+                  ? `${getRoomPeerCount(room)} 位同伴在线`
+                  : "暂无同伴在线"}
+              </small>
             </button>
           ))}
         </section>
@@ -631,8 +663,8 @@ export default function App() {
                 key={index}
                 onClick={() => void playSeatCue(index + 1)}
               >
-                <strong>{peer ? peer.display_name.slice(0, 2) : index + 1}</strong>
-                <span>{peer ? peer.status : "空位"}</span>
+                <strong>{peer ? (peer.user_id === user?.id ? "我" : peer.display_name.slice(0, 2)) : index + 1}</strong>
+                <span>{peer ? (peer.user_id === user?.id ? `我 · ${peer.status}` : peer.status) : "空位"}</span>
               </button>
             ))}
           </div>
