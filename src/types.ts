@@ -48,6 +48,15 @@ export type Encouragement = {
   created_at: string;
 };
 
+export type RoomMessage = {
+  id: string;
+  room_id: string;
+  user_id: string;
+  sender_name: string;
+  message: string;
+  created_at: string;
+};
+
 export type LeaderboardEntry = {
   rank: number;
   user_id: string;
@@ -68,6 +77,14 @@ export type RoomSocketMessage =
   | ({
       type: "encouragement";
     } & Encouragement)
+  | ({
+      type: "message_created";
+    } & RoomMessage)
+  | {
+      type: "message_deleted";
+      room_id: string;
+      id: string;
+    }
   | {
       type: "room_deleted";
       room_id: string;

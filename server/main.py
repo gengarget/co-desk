@@ -138,6 +138,25 @@ def init_db() -> None:
         FOREIGN KEY (room_id) REFERENCES rooms(id),
         FOREIGN KEY (user_id) REFERENCES users(id)
       );
+
+      CREATE TABLE IF NOT EXISTS room_messages (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        deleted_at TEXT,
+        FOREIGN KEY (room_id) REFERENCES rooms(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      """
+    )
+    conn.execute(
+      """
+      INSERT OR IGNORE INTO room_messages (id, room_id, user_id, sender_name, message, created_at, deleted_at)
+      SELECT id, room_id, user_id, sender_name, message, created_at, NULL
+      FROM encouragements
       """
     )
     existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -210,6 +229,16 @@ class EncouragementCreate(BaseModel):
   user_id: str
   sender_name: str = Field(max_length=24)
   message: str = Field(min_length=1, max_length=48)
+
+
+class RoomMessageCreate(BaseModel):
+  user_id: str
+  sender_name: str = Field(max_length=24)
+  message: str = Field(min_length=1, max_length=280)
+
+
+class RoomMessageDelete(BaseModel):
+  user_id: str
 
 
 @dataclass
@@ -306,6 +335,12 @@ class RoomHub:
 
   async def broadcast_encouragement(self, room_id: str, payload: dict[str, Any]) -> None:
     await self._send(room_id, {"type": "encouragement", **payload})
+
+  async def broadcast_message(self, room_id: str, payload: dict[str, Any]) -> None:
+    await self._send(room_id, {"type": "message_created", **payload})
+
+  async def broadcast_message_deleted(self, room_id: str, message_id: str) -> None:
+    await self._send(room_id, {"type": "message_deleted", "room_id": room_id, "id": message_id})
 
   async def close_room(self, room_id: str) -> None:
     async with self.lock:
@@ -479,7 +514,12 @@ async def delete_room(room_id: str) -> dict[str, bool]:
     if not row:
       raise HTTPException(status_code=404, detail="Room not found")
 
+    stamp = now_iso()
     conn.execute("DELETE FROM encouragements WHERE room_id = ?", (room_id,))
+    conn.execute(
+      "UPDATE room_messages SET deleted_at = COALESCE(deleted_at, ?) WHERE room_id = ?",
+      (stamp, room_id),
+    )
     conn.execute("UPDATE focus_sessions SET room_id = NULL WHERE room_id = ?", (room_id,))
     conn.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
     conn.commit()
@@ -632,6 +672,77 @@ async def get_leaderboard(limit: int = 10) -> list[dict[str, Any]]:
   ]
 
 
+@app.get("/api/rooms/{room_id}/messages")
+async def list_room_messages(room_id: str, limit: int = 80) -> list[dict[str, Any]]:
+  limit = max(1, min(limit, 120))
+  with open_db() as conn:
+    room = conn.execute("SELECT id FROM rooms WHERE id = ?", (room_id,)).fetchone()
+    if not room:
+      raise HTTPException(status_code=404, detail="Room not found")
+    rows = conn.execute(
+      """
+      SELECT id, room_id, user_id, sender_name, message, created_at
+      FROM (
+        SELECT id, room_id, user_id, sender_name, message, created_at
+        FROM room_messages
+        WHERE room_id = ? AND deleted_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT ?
+      )
+      ORDER BY created_at ASC
+      """,
+      (room_id, limit),
+    ).fetchall()
+  return [row_to_dict(row) for row in rows]
+
+
+@app.post("/api/rooms/{room_id}/messages")
+async def create_room_message(room_id: str, payload: RoomMessageCreate) -> dict[str, Any]:
+  message = payload.message.strip()
+  if not message:
+    raise HTTPException(status_code=400, detail="Message is required")
+  item = {
+    "id": new_id("msg"),
+    "room_id": room_id,
+    "user_id": payload.user_id,
+    "sender_name": payload.sender_name.strip() or "同桌",
+    "message": message,
+    "created_at": now_iso(),
+  }
+  with open_db() as conn:
+    room = conn.execute("SELECT id FROM rooms WHERE id = ?", (room_id,)).fetchone()
+    if not room:
+      raise HTTPException(status_code=404, detail="Room not found")
+    conn.execute(
+      """
+      INSERT INTO room_messages (id, room_id, user_id, sender_name, message, created_at, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULL)
+      """,
+      (item["id"], room_id, item["user_id"], item["sender_name"], item["message"], item["created_at"]),
+    )
+    conn.commit()
+  await hub.broadcast_message(room_id, item)
+  return item
+
+
+@app.post("/api/rooms/{room_id}/messages/{message_id}/delete")
+async def delete_room_message(room_id: str, message_id: str, payload: RoomMessageDelete) -> dict[str, bool]:
+  with open_db() as conn:
+    row = conn.execute(
+      "SELECT id, user_id, deleted_at FROM room_messages WHERE id = ? AND room_id = ?",
+      (message_id, room_id),
+    ).fetchone()
+    if not row:
+      raise HTTPException(status_code=404, detail="Message not found")
+    if row["user_id"] != payload.user_id:
+      raise HTTPException(status_code=403, detail="Only the sender can delete this message")
+    if row["deleted_at"] is None:
+      conn.execute("UPDATE room_messages SET deleted_at = ? WHERE id = ?", (now_iso(), message_id))
+      conn.commit()
+  await hub.broadcast_message_deleted(room_id, message_id)
+  return {"ok": True}
+
+
 @app.post("/api/rooms/{room_id}/encouragements")
 async def create_encouragement(room_id: str, payload: EncouragementCreate) -> dict[str, Any]:
   item = {
@@ -643,6 +754,9 @@ async def create_encouragement(room_id: str, payload: EncouragementCreate) -> di
     "created_at": now_iso(),
   }
   with open_db() as conn:
+    room = conn.execute("SELECT id FROM rooms WHERE id = ?", (room_id,)).fetchone()
+    if not room:
+      raise HTTPException(status_code=404, detail="Room not found")
     conn.execute(
       """
       INSERT INTO encouragements (id, room_id, user_id, sender_name, message, created_at)
@@ -650,8 +764,16 @@ async def create_encouragement(room_id: str, payload: EncouragementCreate) -> di
       """,
       (item["id"], room_id, item["user_id"], item["sender_name"], item["message"], item["created_at"]),
     )
+    conn.execute(
+      """
+      INSERT OR IGNORE INTO room_messages (id, room_id, user_id, sender_name, message, created_at, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULL)
+      """,
+      (item["id"], room_id, item["user_id"], item["sender_name"], item["message"], item["created_at"]),
+    )
     conn.commit()
   await hub.broadcast_encouragement(room_id, item)
+  await hub.broadcast_message(room_id, item)
   return item
 
 

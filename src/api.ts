@@ -1,4 +1,4 @@
-import type { Encouragement, LeaderboardEntry, Room, Stats, Task, User } from "./types";
+import type { Encouragement, LeaderboardEntry, Room, RoomMessage, Stats, Task, User } from "./types";
 
 const SERVER_BASE_KEY = "codesk_server_base";
 
@@ -149,6 +149,31 @@ export function getStats(userId: string) {
 
 export function getLeaderboard(limit = 10) {
   return request<LeaderboardEntry[]>(`/api/leaderboard?limit=${limit}`);
+}
+
+export function listRoomMessages(roomId: string, limit = 80) {
+  return request<RoomMessage[]>(`/api/rooms/${encodeURIComponent(roomId)}/messages?limit=${limit}`);
+}
+
+export function sendRoomMessage(roomId: string, payload: {
+  user_id: string;
+  sender_name: string;
+  message: string;
+}) {
+  return request<RoomMessage>(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteRoomMessage(roomId: string, messageId: string, userId: string) {
+  return request<{ ok: boolean }>(
+    `/api/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/delete`,
+    {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId })
+    }
+  );
 }
 
 export function sendEncouragement(roomId: string, payload: {

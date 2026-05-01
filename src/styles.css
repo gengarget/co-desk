@@ -614,13 +614,17 @@ button:disabled {
   color: #19745f;
 }
 
-.encouragements {
+.chat-panel {
+  gap: 10px;
+}
+
+.chat-quick-actions {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
 }
 
-.encouragements button {
+.chat-quick-actions button {
   min-height: 38px;
   border: 1px solid #d8dee8;
   border-radius: 8px;
@@ -629,31 +633,85 @@ button:disabled {
   font-weight: 700;
 }
 
-.card-feed {
+.chat-feed {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 84px;
+  max-height: 220px;
+  min-height: 110px;
+  overflow-y: auto;
+  padding-right: 2px;
   color: #7a8799;
   font-size: 13px;
 }
 
-.feed-card {
+.chat-empty {
+  display: grid;
+  place-items: center;
+  min-height: 92px;
+  border: 1px dashed #d8dee8;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #7a8799;
+}
+
+.chat-message {
   border: 1px solid #e0e5ee;
   border-radius: 8px;
-  background: #fffdf8;
+  background: #ffffff;
   padding: 10px;
 }
 
-.feed-card strong {
-  color: #8a5a00;
+.chat-message.mine {
+  border-color: #b9ded6;
+  background: #f3fbf8;
+}
+
+.chat-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
 }
 
-.feed-card p {
+.chat-message-meta strong {
+  min-width: 0;
+  color: #2f5b73;
+  overflow-wrap: anywhere;
+}
+
+.chat-message-meta time {
+  margin-left: auto;
+  color: #9aa4b4;
+  font-size: 11px;
+}
+
+.message-delete {
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #9a3d3d;
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-delete:hover {
+  background: #fff1f1;
+}
+
+.chat-message p {
   margin: 4px 0 0;
   color: #3d4858;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 8px;
 }
 
 .stats {

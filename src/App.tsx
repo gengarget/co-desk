@@ -2,12 +2,13 @@ import {
   BarChart3,
   CheckCircle2,
   Circle,
-  Coffee,
   Headphones,
+  MessageCircle,
   Pause,
   Play,
   Plus,
   Radio,
+  Send,
   Sparkles,
   Square,
   StickyNote,
@@ -23,23 +24,25 @@ import {
   DEFAULT_API_BASE,
   createRoom,
   createTask,
+  deleteRoomMessage,
   deleteRoom,
   deleteTask,
   getApiBase,
   getLeaderboard,
   getWsBase,
   getStats,
+  listRoomMessages,
   loginUser,
   listRooms,
   listTasks,
   registerUser,
   saveFocusSession,
-  sendEncouragement,
+  sendRoomMessage,
   setApiBase,
   updateRoom,
   updateTask
 } from "./api";
-import type { Encouragement, LeaderboardEntry, Peer, Room, RoomSocketMessage, Stats, Task, User } from "./types";
+import type { LeaderboardEntry, Peer, Room, RoomMessage, RoomSocketMessage, Stats, Task, User } from "./types";
 
 const FOCUS_SECONDS = 25 * 60;
 
@@ -49,13 +52,29 @@ const ambientOptions = [
   { id: "cafe", label: "低语咖啡馆" }
 ];
 
-const encouragementOptions = ["稳住，先学 25 分钟", "给你递一杯咖啡", "这题慢慢拆，能搞定"];
+const chatQuickOptions = ["稳住，先学 25 分钟", "给你递一杯咖啡", "这题慢慢拆，能搞定"];
 const AUTH_USER_KEY = "codesk_auth_user";
 
 function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
   const seconds = (totalSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function formatChatTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(new Date(value));
+  } catch {
+    return "";
+  }
+}
+
+function appendRoomMessage(previous: RoomMessage[], message: RoomMessage) {
+  if (previous.some((item) => item.id === message.id)) return previous;
+  return [...previous, message].slice(-80);
 }
 
 function readStoredUser(): User | null {
@@ -99,7 +118,8 @@ export default function App() {
     completed_count: 0
   });
   const [peers, setPeers] = useState<Peer[]>([]);
-  const [cards, setCards] = useState<Encouragement[]>([]);
+  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [preferredSeat, setPreferredSeat] = useState<number | null>(null);
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("offline");
@@ -115,6 +135,7 @@ export default function App() {
   const focusStartedAtRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const stopAudioRef = useRef<Array<() => void>>([]);
+  const chatFeedRef = useRef<HTMLDivElement | null>(null);
 
   const selectedTask = useMemo(() => {
     if (selectedTaskId) {
@@ -145,6 +166,7 @@ export default function App() {
     setRooms([]);
     setActiveRoom(null);
     setPeers([]);
+    setRoomMessages([]);
     void reloadRooms().catch((caught: Error) => setError(caught.message));
     if (user) {
       void reloadTasks(user).catch((caught: Error) => setError(caught.message));
@@ -188,6 +210,33 @@ export default function App() {
   }, [reloadStats, reloadTasks, user]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!activeRoomId) {
+      setRoomMessages([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setRoomMessages([]);
+    listRoomMessages(activeRoomId)
+      .then((messages) => {
+        if (!cancelled) setRoomMessages(messages);
+      })
+      .catch((caught: Error) => {
+        if (!cancelled) setError(caught.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    const feed = chatFeedRef.current;
+    if (!feed) return;
+    feed.scrollTop = feed.scrollHeight;
+  }, [activeRoomId, roomMessages.length]);
+
+  useEffect(() => {
     if (!user || !activeRoomId) return;
     setConnection("connecting");
     const socket = new WebSocket(buildWsUrl(activeRoomId, user));
@@ -221,8 +270,14 @@ export default function App() {
             : previous
         );
       }
-      if (message.type === "encouragement") {
-        setCards((previous) => [message, ...previous].slice(0, 5));
+      if (message.type === "message_created" && message.room_id === activeRoomId) {
+        setRoomMessages((previous) => appendRoomMessage(previous, message));
+      }
+      if (message.type === "message_deleted" && message.room_id === activeRoomId) {
+        setRoomMessages((previous) => previous.filter((item) => item.id !== message.id));
+      }
+      if (message.type === "encouragement" && message.room_id === activeRoomId) {
+        setRoomMessages((previous) => appendRoomMessage(previous, message));
       }
       if (message.type === "room_deleted") {
         void reloadRooms().catch((caught: Error) => setError(caught.message));
@@ -531,7 +586,7 @@ export default function App() {
     setUser(null);
     setTasks([]);
     setPeers([]);
-    setCards([]);
+    setRoomMessages([]);
     setSelectedTaskId(null);
     setConnection("offline");
   }
@@ -640,13 +695,36 @@ export default function App() {
     await reloadStats(user);
   }
 
-  async function handleSendEncouragement(message: string) {
+  async function handleSendChatMessage(message?: string) {
     if (!user || !activeRoom) return;
-    await sendEncouragement(activeRoom.id, {
-      user_id: user.id,
-      sender_name: user.display_name,
-      message
-    });
+    const text = (message ?? chatDraft).trim();
+    if (!text) return;
+    try {
+      const created = await sendRoomMessage(activeRoom.id, {
+        user_id: user.id,
+        sender_name: user.display_name,
+        message: text
+      });
+      setRoomMessages((previous) => appendRoomMessage(previous, created));
+      if (!message) setChatDraft("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "发送消息失败");
+    }
+  }
+
+  async function handleChatSubmit(event: FormEvent) {
+    event.preventDefault();
+    await handleSendChatMessage();
+  }
+
+  async function handleDeleteChatMessage(message: RoomMessage) {
+    if (!user || !activeRoom) return;
+    try {
+      await deleteRoomMessage(activeRoom.id, message.id, user.id);
+      setRoomMessages((previous) => previous.filter((item) => item.id !== message.id));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "撤回消息失败");
+    }
   }
 
   const seatSlots = Array.from({ length: 6 }, (_, index) =>
@@ -996,27 +1074,59 @@ export default function App() {
           </button>
         </section>
 
-        <section className="rail-section">
+        <section className="rail-section chat-panel">
           <div className="section-heading">
-            <Coffee size={16} />
-            <span>轻互动</span>
+            <MessageCircle size={16} />
+            <span>版聊</span>
           </div>
-          <div className="encouragements">
-            {encouragementOptions.map((message) => (
-              <button key={message} onClick={() => void handleSendEncouragement(message)}>
+          <div className="chat-quick-actions">
+            {chatQuickOptions.map((message) => (
+              <button key={message} onClick={() => void handleSendChatMessage(message)}>
                 {message}
               </button>
             ))}
           </div>
-          <div className="card-feed">
-            {cards.length === 0 && <span>房间里的鼓励卡会出现在这里。</span>}
-            {cards.map((card) => (
-              <div className="feed-card" key={card.id}>
-                <strong>{card.sender_name}</strong>
-                <p>{card.message}</p>
-              </div>
+          <div className="chat-feed" ref={chatFeedRef}>
+            {roomMessages.length === 0 && <span className="chat-empty">房间版聊消息会保留在这里。</span>}
+            {roomMessages.map((message) => (
+              <article
+                className={`chat-message ${message.user_id === user.id ? "mine" : ""}`}
+                key={message.id}
+              >
+                <div className="chat-message-meta">
+                  <strong>{message.sender_name}</strong>
+                  <time>{formatChatTime(message.created_at)}</time>
+                  {message.user_id === user.id && (
+                    <button
+                      className="message-delete"
+                      type="button"
+                      onClick={() => void handleDeleteChatMessage(message)}
+                    >
+                      撤回
+                    </button>
+                  )}
+                </div>
+                <p>{message.message}</p>
+              </article>
             ))}
           </div>
+          <form className="chat-form" onSubmit={(event) => void handleChatSubmit(event)}>
+            <input
+              className="text-input"
+              maxLength={280}
+              placeholder="发一条版聊消息"
+              value={chatDraft}
+              onChange={(event) => setChatDraft(event.target.value)}
+            />
+            <button
+              className="icon-button dark"
+              aria-label="发送版聊消息"
+              type="submit"
+              disabled={!chatDraft.trim() || !activeRoom}
+            >
+              <Send size={16} />
+            </button>
+          </form>
         </section>
 
         <section className="rail-section stats">
