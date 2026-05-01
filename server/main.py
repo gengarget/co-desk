@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
+import re
+import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -21,6 +25,8 @@ DATA_DIR = Path(os.environ.get("CODESK_DATA_DIR", ROOT_DIR / "data"))
 DB_PATH = Path(os.environ.get("CODESK_DB_PATH", DATA_DIR / "codesk.sqlite"))
 SERVER_HOST = os.environ.get("HOST", "127.0.0.1")
 SERVER_PORT = int(os.environ.get("PORT", "8124"))
+PASSWORD_ITERATIONS = 160_000
+USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{3,24}$")
 
 
 def parse_cors_origins() -> list[str]:
@@ -42,6 +48,33 @@ def new_id(prefix: str) -> str:
   return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def normalize_username(username: str) -> str:
+  return username.strip().lower()
+
+
+def hash_password(password: str, salt: str) -> str:
+  digest = hashlib.pbkdf2_hmac(
+    "sha256",
+    password.encode("utf-8"),
+    salt.encode("utf-8"),
+    PASSWORD_ITERATIONS,
+  )
+  return digest.hex()
+
+
+def verify_password(password: str, salt: str, expected_hash: str) -> bool:
+  actual_hash = hash_password(password, salt)
+  return hmac.compare_digest(actual_hash, expected_hash)
+
+
+def public_user(row: sqlite3.Row) -> dict[str, Any]:
+  return {
+    "id": row["id"],
+    "username": row["username"] if "username" in row.keys() else None,
+    "display_name": row["display_name"],
+  }
+
+
 def open_db() -> sqlite3.Connection:
   DATA_DIR.mkdir(parents=True, exist_ok=True)
   conn = sqlite3.connect(DB_PATH)
@@ -59,7 +92,11 @@ def init_db() -> None:
       """
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
+        username TEXT UNIQUE,
         display_name TEXT NOT NULL,
+        password_hash TEXT,
+        password_salt TEXT,
+        last_login_at TEXT,
         created_at TEXT NOT NULL
       );
 
@@ -103,6 +140,15 @@ def init_db() -> None:
       );
       """
     )
+    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    for name, ddl in [
+      ("username", "username TEXT"),
+      ("password_hash", "password_hash TEXT"),
+      ("password_salt", "password_salt TEXT"),
+      ("last_login_at", "last_login_at TEXT"),
+    ]:
+      if name not in existing_columns:
+        conn.execute(f"ALTER TABLE users ADD COLUMN {ddl}")
     seeds = [
       ("room_exam", "期末冲刺自习室", "适合课程复习、刷题和报告收尾。"),
       ("room_grad", "考研静音桌", "长时间深度学习，默认弱社交。"),
@@ -121,6 +167,17 @@ def init_db() -> None:
 
 class SessionCreate(BaseModel):
   display_name: str | None = Field(default=None, max_length=24)
+
+
+class AuthRegister(BaseModel):
+  username: str = Field(min_length=3, max_length=24)
+  password: str = Field(min_length=6, max_length=72)
+  display_name: str | None = Field(default=None, max_length=24)
+
+
+class AuthLogin(BaseModel):
+  username: str = Field(min_length=3, max_length=24)
+  password: str = Field(min_length=6, max_length=72)
 
 
 class RoomCreate(BaseModel):
@@ -265,6 +322,54 @@ app.add_middleware(
 @app.get("/api/health")
 async def health() -> dict[str, str]:
   return {"status": "ok", "database": str(DB_PATH)}
+
+
+@app.post("/api/auth/register")
+async def register(payload: AuthRegister) -> dict[str, Any]:
+  username = normalize_username(payload.username)
+  if not USERNAME_PATTERN.match(username):
+    raise HTTPException(status_code=400, detail="用户名只能包含 3-24 位字母、数字或下划线")
+
+  display_name = (payload.display_name or "").strip() or username
+  salt = secrets.token_hex(16)
+  password_hash = hash_password(payload.password, salt)
+  user_id = new_id("user")
+  stamp = now_iso()
+
+  with open_db() as conn:
+    exists = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    if exists:
+      raise HTTPException(status_code=409, detail="这个用户名已经被注册")
+
+    conn.execute(
+      """
+      INSERT INTO users (id, username, display_name, password_hash, password_salt, last_login_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      """,
+      (user_id, username, display_name, password_hash, salt, stamp, stamp),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+  return {"user": public_user(row)}
+
+
+@app.post("/api/auth/login")
+async def login(payload: AuthLogin) -> dict[str, Any]:
+  username = normalize_username(payload.username)
+  with open_db() as conn:
+    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    if not row or not row["password_hash"] or not row["password_salt"]:
+      raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    if not verify_password(payload.password, row["password_salt"], row["password_hash"]):
+      raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now_iso(), row["id"]))
+    conn.commit()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (row["id"],)).fetchone()
+
+  return {"user": public_user(row)}
 
 
 @app.post("/api/session")
@@ -419,6 +524,43 @@ async def get_stats(user_id: str) -> dict[str, Any]:
     "task_count": int(tasks["task_count"]),
     "completed_count": int(tasks["completed_count"]),
   }
+
+
+@app.get("/api/leaderboard")
+async def get_leaderboard(limit: int = 10) -> list[dict[str, Any]]:
+  limit = max(1, min(limit, 50))
+  with open_db() as conn:
+    rows = conn.execute(
+      """
+      SELECT
+        u.id AS user_id,
+        u.username AS username,
+        u.display_name AS display_name,
+        COALESCE(SUM(f.duration_minutes), 0) AS total_minutes,
+        COUNT(f.id) AS session_count,
+        MAX(f.completed_at) AS last_completed_at
+      FROM users u
+      LEFT JOIN focus_sessions f ON f.user_id = u.id
+      WHERE u.username IS NOT NULL
+      GROUP BY u.id, u.username, u.display_name
+      ORDER BY total_minutes DESC, session_count DESC, u.created_at ASC
+      LIMIT ?
+      """,
+      (limit,),
+    ).fetchall()
+
+  return [
+    {
+      "rank": index + 1,
+      "user_id": row["user_id"],
+      "username": row["username"],
+      "display_name": row["display_name"],
+      "total_minutes": int(row["total_minutes"]),
+      "session_count": int(row["session_count"]),
+      "last_completed_at": row["last_completed_at"],
+    }
+    for index, row in enumerate(rows)
+  ]
 
 
 @app.post("/api/rooms/{room_id}/encouragements")

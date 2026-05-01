@@ -1,4 +1,4 @@
-import type { Encouragement, Room, Stats, Task, User } from "./types";
+import type { Encouragement, LeaderboardEntry, Room, Stats, Task, User } from "./types";
 
 const SERVER_BASE_KEY = "codesk_server_base";
 
@@ -49,6 +49,27 @@ export function createSession(displayName?: string) {
   return request<{ user: User }>("/api/session", {
     method: "POST",
     body: JSON.stringify({ display_name: displayName })
+  });
+}
+
+export function registerUser(payload: {
+  username: string;
+  password: string;
+  display_name?: string;
+}) {
+  return request<{ user: User }>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function loginUser(payload: {
+  username: string;
+  password: string;
+}) {
+  return request<{ user: User }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload)
   });
 }
 
@@ -108,6 +129,10 @@ export function saveFocusSession(payload: {
 
 export function getStats(userId: string) {
   return request<Stats>(`/api/users/${encodeURIComponent(userId)}/stats`);
+}
+
+export function getLeaderboard(limit = 10) {
+  return request<LeaderboardEntry[]>(`/api/leaderboard?limit=${limit}`);
 }
 
 export function sendEncouragement(roomId: string, payload: {

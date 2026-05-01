@@ -22,20 +22,22 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import {
   DEFAULT_API_BASE,
   createRoom,
-  createSession,
   createTask,
   deleteTask,
   getApiBase,
+  getLeaderboard,
   getWsBase,
   getStats,
+  loginUser,
   listRooms,
   listTasks,
+  registerUser,
   saveFocusSession,
   sendEncouragement,
   setApiBase,
   updateTask
 } from "./api";
-import type { Encouragement, Peer, Room, RoomSocketMessage, Stats, Task, User } from "./types";
+import type { Encouragement, LeaderboardEntry, Peer, Room, RoomSocketMessage, Stats, Task, User } from "./types";
 
 const FOCUS_SECONDS = 25 * 60;
 
@@ -46,6 +48,7 @@ const ambientOptions = [
 ];
 
 const encouragementOptions = ["稳住，先学 25 分钟", "给你递一杯咖啡", "这题慢慢拆，能搞定"];
+const AUTH_USER_KEY = "codesk_auth_user";
 
 function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
@@ -55,7 +58,7 @@ function formatTime(totalSeconds: number) {
 
 function readStoredUser(): User | null {
   try {
-    const raw = localStorage.getItem("codesk_user");
+    const raw = localStorage.getItem(AUTH_USER_KEY);
     return raw ? (JSON.parse(raw) as User) : null;
   } catch {
     return null;
@@ -73,6 +76,11 @@ function buildWsUrl(roomId: string, user: User) {
 export default function App() {
   const [user, setUser] = useState<User | null>(() => readStoredUser());
   const [displayName, setDisplayName] = useState(() => readStoredUser()?.display_name ?? "第4小组同学");
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authDisplayName, setAuthDisplayName] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
   const [serverBase, setServerBase] = useState(() => getApiBase());
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
@@ -88,6 +96,7 @@ export default function App() {
   });
   const [peers, setPeers] = useState<Peer[]>([]);
   const [cards, setCards] = useState<Encouragement[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("offline");
   const [remaining, setRemaining] = useState(FOCUS_SECONDS);
   const [running, setRunning] = useState(false);
@@ -136,6 +145,7 @@ export default function App() {
       void reloadTasks(user).catch((caught: Error) => setError(caught.message));
       void reloadStats(user).catch((caught: Error) => setError(caught.message));
     }
+    void reloadLeaderboard().catch((caught: Error) => setError(caught.message));
   }
 
   const reloadRooms = useCallback(async () => {
@@ -157,25 +167,14 @@ export default function App() {
     setStats(await getStats(targetUser.id));
   }, []);
 
-  useEffect(() => {
-    if (user) return;
-    let cancelled = false;
-    createSession(displayName)
-      .then(({ user: created }) => {
-        if (cancelled) return;
-        localStorage.setItem("codesk_user", JSON.stringify(created));
-        setUser(created);
-        setDisplayName(created.display_name);
-      })
-      .catch((caught: Error) => setError(caught.message));
-    return () => {
-      cancelled = true;
-    };
-  }, [displayName, user]);
+  const reloadLeaderboard = useCallback(async () => {
+    setLeaderboard(await getLeaderboard(10));
+  }, []);
 
   useEffect(() => {
     reloadRooms().catch((caught: Error) => setError(caught.message));
-  }, [reloadRooms]);
+    reloadLeaderboard().catch((caught: Error) => setError(caught.message));
+  }, [reloadLeaderboard, reloadRooms]);
 
   useEffect(() => {
     if (!user) return;
@@ -269,8 +268,9 @@ export default function App() {
         duration_minutes: Math.max(1, Math.round(elapsedSeconds / 60))
       });
       await reloadStats(user);
+      await reloadLeaderboard();
     },
-    [activeRoom?.id, currentTaskTitle, reloadStats, user]
+    [activeRoom?.id, currentTaskTitle, reloadLeaderboard, reloadStats, user]
   );
 
   useEffect(() => {
@@ -401,6 +401,51 @@ export default function App() {
     setRunning(true);
   }
 
+  async function handleAuth(event: FormEvent) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setError(null);
+    try {
+      const result =
+        authMode === "register"
+          ? await registerUser({
+              username: authUsername,
+              password: authPassword,
+              display_name: authDisplayName || authUsername
+            })
+          : await loginUser({
+              username: authUsername,
+              password: authPassword
+            });
+
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(result.user));
+      localStorage.removeItem("codesk_user");
+      setUser(result.user);
+      setDisplayName(result.user.display_name);
+      setAuthPassword("");
+      setAuthDisplayName("");
+      await reloadTasks(result.user);
+      await reloadStats(result.user);
+      await reloadLeaderboard();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "登录失败");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    wsRef.current?.close();
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem("codesk_user");
+    setUser(null);
+    setTasks([]);
+    setPeers([]);
+    setCards([]);
+    setSelectedTaskId(null);
+    setConnection("offline");
+  }
+
   async function handleCreateRoom(event: FormEvent) {
     event.preventDefault();
     const name = newRoomName.trim();
@@ -480,6 +525,110 @@ export default function App() {
     peers.find((peer) => peer.seat === index + 1)
   );
 
+  if (!user) {
+    return (
+      <div className="auth-shell">
+        <section className="auth-card">
+          <div className="brand auth-brand">
+            <div className="brand-mark">CD</div>
+            <div>
+              <strong>Co-Desk</strong>
+              <span>登录后开始联机自习</span>
+            </div>
+          </div>
+
+          {error && (
+            <button className="error-banner" onClick={() => setError(null)}>
+              {error}
+            </button>
+          )}
+
+          <form className="auth-form" onSubmit={(event) => void handleAuth(event)}>
+            <div className="auth-tabs">
+              <button
+                type="button"
+                className={authMode === "login" ? "active" : ""}
+                onClick={() => setAuthMode("login")}
+              >
+                登录
+              </button>
+              <button
+                type="button"
+                className={authMode === "register" ? "active" : ""}
+                onClick={() => setAuthMode("register")}
+              >
+                注册
+              </button>
+            </div>
+
+            <label className="field-label" htmlFor="auth-username">用户名</label>
+            <input
+              id="auth-username"
+              className="text-input"
+              value={authUsername}
+              minLength={3}
+              maxLength={24}
+              placeholder="3-24 位字母、数字或下划线"
+              onChange={(event) => setAuthUsername(event.target.value)}
+              required
+            />
+
+            <label className="field-label" htmlFor="auth-password">密码</label>
+            <input
+              id="auth-password"
+              className="text-input"
+              value={authPassword}
+              minLength={6}
+              maxLength={72}
+              type="password"
+              placeholder="至少 6 位"
+              onChange={(event) => setAuthPassword(event.target.value)}
+              required
+            />
+
+            {authMode === "register" && (
+              <>
+                <label className="field-label" htmlFor="auth-display-name">显示昵称</label>
+                <input
+                  id="auth-display-name"
+                  className="text-input"
+                  value={authDisplayName}
+                  maxLength={24}
+                  placeholder="排行榜和房间里显示的名字"
+                  onChange={(event) => setAuthDisplayName(event.target.value)}
+                />
+              </>
+            )}
+
+            <label className="field-label" htmlFor="auth-server">后端服务器</label>
+            <div className="server-config">
+              <input
+                id="auth-server"
+                className="text-input"
+                value={serverBase}
+                placeholder="https://co-desk-api.onrender.com"
+                onChange={(event) => {
+                  setServerBase(event.target.value);
+                  setServerSaved(false);
+                }}
+              />
+              <button className="icon-button dark" aria-label="保存服务器" type="button" onClick={applyServerBase}>
+                <Wifi size={18} />
+              </button>
+            </div>
+            <span className={`server-hint ${serverSaved ? "saved" : ""}`}>
+              {serverSaved ? "当前账号会连接这个地址" : "修改后点击右侧按钮生效"}
+            </span>
+
+            <button className="primary-action auth-submit" type="submit" disabled={authLoading}>
+              {authLoading ? "处理中..." : authMode === "register" ? "创建账号" : "登录 Co-Desk"}
+            </button>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -492,7 +641,7 @@ export default function App() {
         </div>
 
         <section className="sidebar-section">
-          <label className="field-label" htmlFor="display-name">身份</label>
+          <label className="field-label" htmlFor="display-name">账号身份</label>
           <input
             id="display-name"
             className="text-input"
@@ -501,10 +650,14 @@ export default function App() {
             onBlur={() => {
               if (!user) return;
               const nextUser = { ...user, display_name: displayName.trim() || user.display_name };
-              localStorage.setItem("codesk_user", JSON.stringify(nextUser));
+              localStorage.setItem(AUTH_USER_KEY, JSON.stringify(nextUser));
               setUser(nextUser);
             }}
           />
+          <span className="server-hint saved">@{user.username ?? "guest"}</span>
+          <button className="logout-button" type="button" onClick={handleLogout}>
+            退出登录
+          </button>
         </section>
 
         <section className="sidebar-section">
@@ -727,6 +880,26 @@ export default function App() {
           <div className="stat-row">
             <strong>{stats.completed_count}/{stats.task_count}</strong>
             <span>完成任务</span>
+          </div>
+        </section>
+
+        <section className="rail-section leaderboard">
+          <div className="section-heading">
+            <Users size={16} />
+            <span>自习时间排行榜</span>
+          </div>
+          <div className="leaderboard-list">
+            {leaderboard.length === 0 && <span className="empty-leaderboard">完成一次专注后就会上榜。</span>}
+            {leaderboard.map((entry) => (
+              <div className={`leaderboard-row ${entry.user_id === user.id ? "me" : ""}`} key={entry.user_id}>
+                <strong>{entry.rank}</strong>
+                <div>
+                  <span>{entry.display_name}</span>
+                  <small>{entry.session_count} 轮专注</small>
+                </div>
+                <b>{entry.total_minutes} 分钟</b>
+              </div>
+            ))}
           </div>
         </section>
       </aside>

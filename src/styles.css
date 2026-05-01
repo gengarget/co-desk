@@ -44,6 +44,63 @@ button:disabled {
   overflow: hidden;
 }
 
+.auth-shell {
+  display: grid;
+  place-items: center;
+  width: 100vw;
+  height: 100vh;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(47, 143, 131, 0.12), transparent 28%),
+    linear-gradient(135deg, #f6f7f9 0%, #ffffff 48%, #eef5f2 100%);
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(440px, 100%);
+  border: 1px solid #e0e5ee;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.13);
+  padding: 28px;
+}
+
+.auth-brand {
+  margin-bottom: 18px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.auth-tabs button {
+  min-height: 40px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #566276;
+  font-weight: 800;
+}
+
+.auth-tabs button.active {
+  border-color: #172033;
+  background: #172033;
+  color: #ffffff;
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .sidebar,
 .right-rail {
   background: rgba(255, 255, 255, 0.92);
@@ -199,6 +256,15 @@ button:disabled {
 
 .server-hint.saved {
   color: #687385;
+}
+
+.logout-button {
+  min-height: 36px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #566276;
+  font-weight: 800;
 }
 
 .icon-button {
@@ -557,6 +623,76 @@ button:disabled {
   color: #6d798a;
   font-size: 13px;
   font-weight: 700;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1px solid #e0e5ee;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.leaderboard-row.me {
+  border-color: #83c9bb;
+  background: #effaf6;
+}
+
+.leaderboard-row strong {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #172033;
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.leaderboard-row div {
+  min-width: 0;
+}
+
+.leaderboard-row span,
+.leaderboard-row small {
+  display: block;
+}
+
+.leaderboard-row span {
+  overflow: hidden;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-row small {
+  margin-top: 2px;
+  color: #718095;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.leaderboard-row b {
+  color: #19745f;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.empty-leaderboard {
+  color: #7a8799;
+  font-size: 13px;
 }
 
 @media (max-width: 1100px) {

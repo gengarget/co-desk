@@ -1,5 +1,6 @@
 export type User = {
   id: string;
+  username?: string | null;
   display_name: string;
 };
 
@@ -45,6 +46,16 @@ export type Encouragement = {
   sender_name: string;
   message: string;
   created_at: string;
+};
+
+export type LeaderboardEntry = {
+  rank: number;
+  user_id: string;
+  username: string;
+  display_name: string;
+  total_minutes: number;
+  session_count: number;
+  last_completed_at: string | null;
 };
 
 export type RoomSocketMessage =
