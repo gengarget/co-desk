@@ -84,6 +84,22 @@ export function createRoom(name: string, description = "") {
   });
 }
 
+export function updateRoom(roomId: string, payload: {
+  name?: string;
+  description?: string;
+}) {
+  return request<Room>(`/api/rooms/${encodeURIComponent(roomId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteRoom(roomId: string) {
+  return request<{ ok: boolean }>(`/api/rooms/${encodeURIComponent(roomId)}`, {
+    method: "DELETE"
+  });
+}
+
 export function listTasks(userId: string) {
   return request<Task[]>(`/api/users/${encodeURIComponent(userId)}/tasks`);
 }

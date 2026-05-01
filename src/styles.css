@@ -205,6 +205,20 @@ button:disabled {
   min-height: 0;
 }
 
+.room-row {
+  border: 1px solid #e0e5ee;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.room-row.active,
+.room-row:hover {
+  border-color: #2f8f83;
+  background: #f1fbf8;
+}
+
 .room-button {
   display: flex;
   flex-direction: column;
@@ -212,19 +226,12 @@ button:disabled {
   gap: 6px;
   width: 100%;
   min-height: 66px;
-  border: 1px solid #e0e5ee;
-  border-radius: 8px;
-  background: #ffffff;
+  border: 0;
+  background: transparent;
   color: #182132;
   padding: 12px;
   text-align: left;
-  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
-}
-
-.room-button:hover,
-.room-button.active {
-  border-color: #2f8f83;
-  background: #f1fbf8;
+  transition: transform 0.18s ease;
 }
 
 .room-button:active {
@@ -239,6 +246,43 @@ button:disabled {
 .room-button small {
   color: #69778a;
   font-size: 12px;
+}
+
+.room-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  border-top: 1px solid #edf0f4;
+  padding: 0 10px 10px;
+}
+
+.room-edit-form {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  padding: 10px;
+}
+
+.mini-button {
+  min-height: 30px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #566276;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mini-button.primary {
+  border-color: #172033;
+  background: #172033;
+  color: #ffffff;
+}
+
+.mini-button.danger {
+  border-color: #f2c4c4;
+  color: #a73535;
 }
 
 .new-room,

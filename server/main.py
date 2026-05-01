@@ -185,6 +185,11 @@ class RoomCreate(BaseModel):
   description: str = Field(default="", max_length=120)
 
 
+class RoomUpdate(BaseModel):
+  name: str | None = Field(default=None, min_length=1, max_length=32)
+  description: str | None = Field(default=None, max_length=120)
+
+
 class TaskCreate(BaseModel):
   title: str = Field(min_length=1, max_length=80)
 
@@ -288,6 +293,16 @@ class RoomHub:
 
   async def broadcast_encouragement(self, room_id: str, payload: dict[str, Any]) -> None:
     await self._send(room_id, {"type": "encouragement", **payload})
+
+  async def close_room(self, room_id: str) -> None:
+    async with self.lock:
+      peers = list(self.rooms.pop(room_id, {}).values())
+    for peer in peers:
+      try:
+        await peer.websocket.send_json({"type": "room_deleted", "room_id": room_id})
+        await peer.websocket.close(code=4001)
+      except Exception:
+        pass
 
   async def _send(self, room_id: str, payload: dict[str, Any]) -> None:
     async with self.lock:
@@ -417,6 +432,47 @@ async def create_room(payload: RoomCreate) -> dict[str, Any]:
   item = row_to_dict(row)
   item["online_count"] = 0
   return item
+
+
+@app.patch("/api/rooms/{room_id}")
+async def update_room(room_id: str, payload: RoomUpdate) -> dict[str, Any]:
+  with open_db() as conn:
+    row = conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
+    if not row:
+      raise HTTPException(status_code=404, detail="Room not found")
+
+    name = row["name"] if payload.name is None else payload.name.strip()
+    description = row["description"] if payload.description is None else payload.description.strip()
+    if not name:
+      raise HTTPException(status_code=400, detail="Room name is required")
+
+    conn.execute(
+      "UPDATE rooms SET name = ?, description = ? WHERE id = ?",
+      (name, description, room_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
+
+  item = row_to_dict(row)
+  item["online_count"] = await hub.count(room_id)
+  await hub.broadcast_state(room_id)
+  return item
+
+
+@app.delete("/api/rooms/{room_id}")
+async def delete_room(room_id: str) -> dict[str, bool]:
+  with open_db() as conn:
+    row = conn.execute("SELECT id FROM rooms WHERE id = ?", (room_id,)).fetchone()
+    if not row:
+      raise HTTPException(status_code=404, detail="Room not found")
+
+    conn.execute("DELETE FROM encouragements WHERE room_id = ?", (room_id,))
+    conn.execute("UPDATE focus_sessions SET room_id = NULL WHERE room_id = ?", (room_id,))
+    conn.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+    conn.commit()
+
+  await hub.close_room(room_id)
+  return {"ok": True}
 
 
 @app.get("/api/users/{user_id}/tasks")

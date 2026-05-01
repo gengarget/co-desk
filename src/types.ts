@@ -69,6 +69,10 @@ export type RoomSocketMessage =
       type: "encouragement";
     } & Encouragement)
   | {
+      type: "room_deleted";
+      room_id: string;
+    }
+  | {
       type: "pong";
       at: string;
     };

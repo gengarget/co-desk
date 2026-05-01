@@ -23,6 +23,7 @@ import {
   DEFAULT_API_BASE,
   createRoom,
   createTask,
+  deleteRoom,
   deleteTask,
   getApiBase,
   getLeaderboard,
@@ -35,6 +36,7 @@ import {
   saveFocusSession,
   sendEncouragement,
   setApiBase,
+  updateRoom,
   updateTask
 } from "./api";
 import type { Encouragement, LeaderboardEntry, Peer, Room, RoomSocketMessage, Stats, Task, User } from "./types";
@@ -85,6 +87,8 @@ export default function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
   const [newRoomName, setNewRoomName] = useState("");
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [editingRoomName, setEditingRoomName] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -216,6 +220,9 @@ export default function App() {
       }
       if (message.type === "encouragement") {
         setCards((previous) => [message, ...previous].slice(0, 5));
+      }
+      if (message.type === "room_deleted") {
+        void reloadRooms().catch((caught: Error) => setError(caught.message));
       }
     };
 
@@ -517,6 +524,7 @@ export default function App() {
   }
 
   function handleSelectRoom(room: Room) {
+    if (editingRoomId) return;
     if (activeRoom?.id && activeRoom.id !== room.id && user) {
       setRooms((previous) =>
         previous.map((item) =>
@@ -528,6 +536,41 @@ export default function App() {
     }
     setPeers([]);
     setActiveRoom(room);
+  }
+
+  function startEditRoom(room: Room) {
+    setEditingRoomId(room.id);
+    setEditingRoomName(room.name);
+  }
+
+  async function handleRenameRoom(event: FormEvent) {
+    event.preventDefault();
+    if (!editingRoomId) return;
+    const name = editingRoomName.trim();
+    if (!name) return;
+    const updated = await updateRoom(editingRoomId, { name });
+    setRooms((previous) => previous.map((room) => (room.id === updated.id ? updated : room)));
+    setActiveRoom((previous) => (previous?.id === updated.id ? updated : previous));
+    setEditingRoomId(null);
+    setEditingRoomName("");
+  }
+
+  async function handleDeleteRoom(room: Room) {
+    const confirmed = window.confirm(`确定删除「${room.name}」吗？房间内的鼓励卡会被清理。`);
+    if (!confirmed) return;
+    await deleteRoom(room.id);
+    setRooms((previous) => {
+      const nextRooms = previous.filter((item) => item.id !== room.id);
+      if (activeRoom?.id === room.id) {
+        setActiveRoom(nextRooms[0] ?? null);
+        setPeers([]);
+      }
+      return nextRooms;
+    });
+    if (editingRoomId === room.id) {
+      setEditingRoomId(null);
+      setEditingRoomName("");
+    }
   }
 
   async function handleAddTask(event: FormEvent) {
@@ -748,18 +791,38 @@ export default function App() {
             <span>自习房间</span>
           </div>
           {rooms.map((room) => (
-            <button
-              className={`room-button ${activeRoom?.id === room.id ? "active" : ""}`}
-              key={room.id}
-              onClick={() => handleSelectRoom(room)}
-            >
-              <span>{room.name}</span>
-              <small>
-                {getRoomPeerCount(room) > 0
-                  ? `${getRoomPeerCount(room)} 位同伴在线`
-                  : "暂无同伴在线"}
-              </small>
-            </button>
+            <div className={`room-row ${activeRoom?.id === room.id ? "active" : ""}`} key={room.id}>
+              {editingRoomId === room.id ? (
+                <form className="room-edit-form" onSubmit={(event) => void handleRenameRoom(event)}>
+                  <input
+                    className="text-input"
+                    value={editingRoomName}
+                    autoFocus
+                    maxLength={32}
+                    onChange={(event) => setEditingRoomName(event.target.value)}
+                  />
+                  <button className="mini-button primary" type="submit">保存</button>
+                  <button className="mini-button" type="button" onClick={() => setEditingRoomId(null)}>取消</button>
+                </form>
+              ) : (
+                <>
+                  <button className="room-button" onClick={() => handleSelectRoom(room)}>
+                    <span>{room.name}</span>
+                    <small>
+                      {getRoomPeerCount(room) > 0
+                        ? `${getRoomPeerCount(room)} 位同伴在线`
+                        : "暂无同伴在线"}
+                    </small>
+                  </button>
+                  <div className="room-actions">
+                    <button className="mini-button" type="button" onClick={() => startEditRoom(room)}>改名</button>
+                    <button className="mini-button danger" type="button" onClick={() => void handleDeleteRoom(room)}>
+                      删除
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           ))}
         </section>
 
