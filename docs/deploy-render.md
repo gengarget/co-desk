@@ -32,6 +32,15 @@ CODESK_DATA_DIR=/app/data
 CODESK_CORS_REGEX=.*
 ```
 
+`render.yaml` 已经指定：
+
+```yaml
+dockerfilePath: ./server/Dockerfile
+dockerContext: ./server
+```
+
+这表示 Render 会在 `server/` 目录内构建后端镜像。
+
 6. 部署成功后，Render 会给一个地址，例如：
 
 ```text
