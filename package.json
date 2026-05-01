@@ -10,7 +10,8 @@
     "dev:client": "vite --host 127.0.0.1",
     "electron": "wait-on http://127.0.0.1:5173 && electron .",
     "stop:dev": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-NetTCPConnection -LocalPort 8124,5173 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }\"",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "dist:win": "npm run build && electron-builder --win portable --x64"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -23,8 +24,33 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
     "electron": "^33.3.0",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.codesk.desktop",
+    "productName": "Co-Desk",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Co-Desk-${version}-portable.${ext}"
+    }
   }
 }
