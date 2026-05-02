@@ -48,10 +48,10 @@ const FOCUS_SECONDS = 25 * 60;
 
 const ambientOptions = [
   { id: "library", label: "图书馆底噪" },
-  { id: "rain", label: "雨夜自习室" },
-  { id: "cafe", label: "低语咖啡馆" }
+  { id: "rain", label: "雨夜自习室" }
 ];
 
+const RAIN_NIGHT_AUDIO_SRC = "audio/rain-night.mp3";
 const chatQuickOptions = ["稳住，先学 25 分钟", "给你递一杯咖啡", "这题慢慢拆，能搞定"];
 const AUTH_USER_KEY = "codesk_auth_user";
 
@@ -134,6 +134,7 @@ export default function App() {
   const runningRef = useRef(false);
   const focusStartedAtRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const stopAudioRef = useRef<Array<() => void>>([]);
   const chatFeedRef = useRef<HTMLDivElement | null>(null);
 
@@ -364,6 +365,15 @@ export default function App() {
   function clearAmbientAudio() {
     stopAudioRef.current.forEach((stop) => stop());
     stopAudioRef.current = [];
+    const audio = audioElementRef.current;
+    if (audio) {
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+      }
+      audioElementRef.current = null;
+    }
   }
 
   function createNoiseSource(ctx: AudioContext) {
@@ -378,80 +388,34 @@ export default function App() {
     return source;
   }
 
-  function createSoftRainSource(ctx: AudioContext) {
-    const buffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    let smooth = 0;
-    for (let index = 0; index < data.length; index += 1) {
-      smooth = smooth * 0.965 + (Math.random() * 2 - 1) * 0.035;
-      data[index] = smooth * 1.8;
-    }
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
-    return source;
-  }
-
-  function startRainNightAudio(ctx: AudioContext) {
-    const rainGain = ctx.createGain();
-    rainGain.gain.value = 0.13;
-    rainGain.connect(ctx.destination);
-    stopAudioRef.current.push(() => rainGain.disconnect());
-
-    const rain = createSoftRainSource(ctx);
-    const rainLowpass = ctx.createBiquadFilter();
-    rainLowpass.type = "lowpass";
-    rainLowpass.frequency.value = 1150;
-    rainLowpass.Q.value = 0.35;
-    rain.connect(rainLowpass);
-    rainLowpass.connect(rainGain);
-    rain.start();
-    stopAudioRef.current.push(() => {
-      rain.stop();
-      rain.disconnect();
-      rainLowpass.disconnect();
-    });
-
-    const createDrop = () => {
-      const drop = createNoiseSource(ctx);
-      const dropFilter = ctx.createBiquadFilter();
-      const dropGain = ctx.createGain();
-      dropFilter.type = "bandpass";
-      dropFilter.frequency.value = 1700 + Math.random() * 1300;
-      dropFilter.Q.value = 5 + Math.random() * 5;
-      dropGain.gain.setValueAtTime(0.001, ctx.currentTime);
-      dropGain.gain.exponentialRampToValueAtTime(0.012 + Math.random() * 0.012, ctx.currentTime + 0.018);
-      dropGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16 + Math.random() * 0.12);
-      drop.connect(dropFilter);
-      dropFilter.connect(dropGain);
-      dropGain.connect(rainGain);
-      drop.start();
-      drop.stop(ctx.currentTime + 0.35);
-    };
-
-    const intervalId = window.setInterval(createDrop, 420 + Math.random() * 360);
-    stopAudioRef.current.push(() => window.clearInterval(intervalId));
+  async function startRainNightAudio() {
+    const audio = new Audio(RAIN_NIGHT_AUDIO_SRC);
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0.55;
+    audioElementRef.current = audio;
+    await audio.play();
   }
 
   async function startAmbientAudio(mode: string) {
-    const ctx = getAudioContext();
-    await ctx.resume();
     clearAmbientAudio();
 
     if (mode === "rain") {
-      startRainNightAudio(ctx);
+      await startRainNightAudio();
       return;
     }
 
+    const ctx = getAudioContext();
+    await ctx.resume();
     const gain = ctx.createGain();
-    gain.gain.value = mode === "cafe" ? 0.16 : 0.22;
+    gain.gain.value = 0.22;
     gain.connect(ctx.destination);
     stopAudioRef.current.push(() => gain.disconnect());
 
     const noise = createNoiseSource(ctx);
     const filter = ctx.createBiquadFilter();
-    filter.type = mode === "rain" ? "highpass" : "lowpass";
-    filter.frequency.value = mode === "rain" ? 900 : mode === "cafe" ? 520 : 360;
+    filter.type = "lowpass";
+    filter.frequency.value = 360;
     noise.connect(filter);
     filter.connect(gain);
     noise.start();
@@ -460,22 +424,6 @@ export default function App() {
       noise.disconnect();
       filter.disconnect();
     });
-
-    if (mode === "cafe") {
-      const hum = ctx.createOscillator();
-      const humGain = ctx.createGain();
-      hum.type = "sine";
-      hum.frequency.value = 120;
-      humGain.gain.value = 0.02;
-      hum.connect(humGain);
-      humGain.connect(gain);
-      hum.start();
-      stopAudioRef.current.push(() => {
-        hum.stop();
-        hum.disconnect();
-        humGain.disconnect();
-      });
-    }
   }
 
   async function toggleAmbientAudio() {
@@ -484,13 +432,22 @@ export default function App() {
       setAudioOn(false);
       return;
     }
-    await startAmbientAudio(ambientId);
-    setAudioOn(true);
+    try {
+      await startAmbientAudio(ambientId);
+      setAudioOn(true);
+    } catch (caught) {
+      clearAmbientAudio();
+      setAudioOn(false);
+      setError(caught instanceof Error ? caught.message : "环境音播放失败");
+    }
   }
 
   useEffect(() => {
     if (!audioOn) return;
-    void startAmbientAudio(ambientId);
+    void startAmbientAudio(ambientId).catch((caught: Error) => {
+      setAudioOn(false);
+      setError(caught.message);
+    });
     return undefined;
   }, [ambientId]);
 
